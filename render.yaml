@@ -1,0 +1,21 @@
+# One-click deploy to Render free tier. Add keys in the dashboard or here.
+services:
+  - type: web
+    name: flowscope
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: SEC_USER_AGENT
+        value: FlowScope/1.0 (you@example.com)
+      - key: REFRESH_INTERVAL_SECONDS
+        value: "300"
+      - key: MAX_TICKERS_PER_CYCLE
+        value: "120"
+      # Optional — set in Render dashboard (kept secret):
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: TRADIER_TOKEN
+        sync: false
+      - key: FMP_API_KEY
+        sync: false

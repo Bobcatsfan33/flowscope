@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowScope — Options Flow Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📡</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">📡</span>
+      <div>
+        <h1>FlowScope</h1>
+        <p class="tagline">Free multi-source options flow &amp; catalyst radar</p>
+      </div>
+    </div>
+    <div class="status">
+      <div class="status-line">
+        <span class="dot" id="status-dot"></span>
+        <span id="status-text">connecting…</span>
+      </div>
+      <div class="status-sub" id="status-sub">—</div>
+      <button id="refresh-btn" title="Trigger a fresh scan">⟳ Scan now</button>
+    </div>
+  </header>
+
+  <section class="caps" id="caps"></section>
+
+  <main>
+    <section class="panel flow-panel">
+      <div class="panel-head">
+        <h2>Ranked Options Flow</h2>
+        <div class="controls">
+          <input type="search" id="search" placeholder="Search ticker… (e.g. NVDA)" />
+          <select id="direction-filter">
+            <option value="">All directions</option>
+            <option value="bullish">Bullish ▲</option>
+            <option value="bearish">Bearish ▼</option>
+            <option value="neutral">Neutral —</option>
+          </select>
+          <label class="slider">
+            Min score <output id="min-score-val">0</output>
+            <input type="range" id="min-score" min="0" max="100" step="5" value="0" />
+          </label>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="flow-table">
+          <thead>
+            <tr>
+              <th data-sort="rank">#</th>
+              <th data-sort="symbol">Ticker</th>
+              <th data-sort="flow_score">Flow Score</th>
+              <th data-sort="direction">Signal</th>
+              <th data-sort="call_premium">Call $</th>
+              <th data-sort="put_premium">Put $</th>
+              <th data-sort="call_put_ratio">C/P</th>
+              <th data-sort="total_volume">Volume</th>
+              <th data-sort="unusual_contracts">Unusual</th>
+              <th>Catalysts</th>
+            </tr>
+          </thead>
+          <tbody id="flow-body"></tbody>
+        </table>
+        <div id="flow-empty" class="empty">Warming up — first scan in progress…</div>
+      </div>
+    </section>
+
+    <aside class="panel feed-panel">
+      <div class="panel-head">
+        <h2>Catalyst Feed</h2>
+        <select id="catalyst-filter">
+          <option value="">All signals</option>
+          <option value="insider">Insider</option>
+          <option value="congress">Congress / officials</option>
+          <option value="institutional">Institutional 13F</option>
+          <option value="gov_contract">Gov contracts</option>
+          <option value="sec_filing">SEC filings</option>
+          <option value="news">News</option>
+          <option value="earnings">Earnings</option>
+        </select>
+      </div>
+      <div id="catalyst-feed" class="feed"></div>
+    </aside>
+  </main>
+
+  <footer>
+    <span id="footer-meta">FlowScope · data is delayed &amp; for research only — not investment advice.</span>
+  </footer>
+
+  <div id="drawer" class="drawer hidden">
+    <div class="drawer-head">
+      <h3 id="drawer-title">—</h3>
+      <button id="drawer-close">✕</button>
+    </div>
+    <div id="drawer-body"></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

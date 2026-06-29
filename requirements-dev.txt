@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8.3            # verified 9.1.1
+pytest-asyncio>=0.25  # verified 1.4.0
+respx>=0.22           # verified 0.23.1 (httpx mocking)
