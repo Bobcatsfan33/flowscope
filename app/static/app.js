@@ -26,6 +26,8 @@ const fmtMoney = (n) => {
   return n.toFixed(0);
 };
 const fmtNum = (n) => (n == null ? "—" : n.toLocaleString("en-US"));
+// null = undefined/infinite ratio (calls, no puts); 999 kept for old snapshots.
+const fmtRatio = (r) => (r == null || r >= 999 ? "∞" : r.toFixed(2));
 const arrow = (dir) =>
   dir === "bullish" ? '<span class="arrow-up">▲</span>'
   : dir === "bearish" ? '<span class="arrow-down">▼</span>'
@@ -77,7 +79,8 @@ function renderStatus(health, meta) {
   } else if (health.has_snapshot) {
     const when = meta && meta.generated_at ? new Date(meta.generated_at) : null;
     const ago = when ? Math.round((Date.now() - when.getTime()) / 1000) : null;
-    const sub = `${meta ? meta.scanned : "?"} scanned · updated ${ago != null ? ago + "s ago" : "?"}`;
+    const closed = health.market_session === "closed" ? " · market closed" : "";
+    const sub = `${meta ? meta.scanned : "?"} scanned · updated ${ago != null ? ago + "s ago" : "?"}${closed}`;
     setStatus("live", health.running ? "live · rescanning" : "live", sub);
   } else {
     setStatus("warming", "warming up…", "");
@@ -96,9 +99,18 @@ function renderCaps(caps) {
     fmp: "FMP",
     newsapi: "NewsAPI",
     quiver: "Quiver",
+    alphavantage: "AlphaVantage",
   };
   $("#caps").innerHTML = Object.entries(caps)
-    .map(([k, on]) => `<span class="cap ${on ? "on" : "off"}">${on ? "●" : "○"} ${labels[k] || k}</span>`)
+    .map(([k, v]) => {
+      // String values = reserved hooks ("configured (not yet used)" etc.):
+      // never shown as live/green, only annotated.
+      const reserved = typeof v === "string";
+      const on = !reserved && !!v;
+      const title = reserved ? ` title="${v}"` : "";
+      const suffix = reserved ? " (reserved)" : "";
+      return `<span class="cap ${on ? "on" : "off"}"${title}>${on ? "●" : "○"} ${labels[k] || k}${suffix}</span>`;
+    })
     .join("");
 }
 
@@ -149,7 +161,7 @@ function renderFlows() {
         <td><span class="${sigClass(f.direction)}">${arrow(f.direction)} ${f.direction}</span></td>
         <td>${fmtMoney(f.call_premium)}</td>
         <td>${fmtMoney(f.put_premium)}</td>
-        <td>${f.call_put_ratio >= 999 ? "∞" : f.call_put_ratio.toFixed(2)}</td>
+        <td>${fmtRatio(f.call_put_ratio)}</td>
         <td>${fmtNum(f.total_volume)}</td>
         <td>${f.unusual_contracts}</td>
         <td><div class="cat-badges">${badgeHtml || '<span class="badge">—</span>'}</div></td>
@@ -200,7 +212,7 @@ function openDrawer(symbol) {
         <div class="kv"><span>Direction</span><span class="${sigClass(f.direction)}">${arrow(f.direction)} ${f.direction} (${(f.direction_confidence * 100).toFixed(0)}%)</span></div>
         <div class="kv"><span>Call premium</span><span>$${fmtMoney(f.call_premium)}</span></div>
         <div class="kv"><span>Put premium</span><span>$${fmtMoney(f.put_premium)}</span></div>
-        <div class="kv"><span>Call/Put ratio</span><span>${f.call_put_ratio >= 999 ? "∞" : f.call_put_ratio.toFixed(2)}</span></div>
+        <div class="kv"><span>Call/Put ratio</span><span>${fmtRatio(f.call_put_ratio)}</span></div>
         <div class="kv"><span>Total volume</span><span>${fmtNum(f.total_volume)}</span></div>
         <div class="kv"><span>Unusual contracts</span><span>${f.unusual_contracts}</span></div>
         <div class="kv"><span>Sources</span><span>${(f.sources || []).join(", ")}</span></div>

@@ -19,10 +19,12 @@ class SnapshotStore:
         self._last_run_started: str | None = None
         self._last_error: str | None = None
         self._running: bool = False
+        self._data_as_of: str | None = None  # last *successful* scan time
 
     def set_snapshot(self, snapshot: Snapshot) -> None:
         with self._lock:
             self._snapshot = snapshot
+            self._data_as_of = snapshot.generated_at
 
     def get_snapshot(self) -> Snapshot | None:
         with self._lock:
@@ -47,6 +49,7 @@ class SnapshotStore:
                 "last_error": self._last_error,
                 "has_snapshot": snap is not None,
                 "generated_at": snap.generated_at if snap else None,
+                "data_as_of": self._data_as_of,
                 "flows_count": len(snap.flows) if snap else 0,
                 "catalysts_count": len(snap.catalysts) if snap else 0,
             }

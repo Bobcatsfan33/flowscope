@@ -3,11 +3,18 @@
 Runs the universe refresh and flow scan on an interval using APScheduler's
 AsyncIOScheduler (jobs run on the app event loop). The first scan is kicked off
 shortly after startup so the dashboard populates without waiting a full cycle.
+
+Scan cycles are gated on the US regular session (Mon-Fri 09:30-16:00
+America/New_York). Off-hours cycles are skipped so stale market data is never
+re-stamped with a fresh `generated_at`; the last snapshot keeps being served.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
+from datetime import time as dt_time
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -18,9 +25,26 @@ from app.universe import UniverseCache
 
 logger = logging.getLogger("flowscope.scheduler")
 
+MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_OPEN = dt_time(9, 30)
+MARKET_CLOSE = dt_time(16, 0)
+
 _scheduler: AsyncIOScheduler | None = None
 _universe: UniverseCache | None = None
 _scan_lock = asyncio.Lock()
+
+
+def current_market_session(now: datetime | None = None) -> str:
+    """Return "open" during the US regular session, else "closed".
+
+    Regular session = Mon-Fri 09:30-16:00 America/New_York. Exchange holidays
+    are not modeled (no holiday-calendar dependency); holiday scans will run
+    but only re-observe the last session's data.
+    """
+    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+    if now_et.weekday() >= 5:  # Saturday/Sunday
+        return "closed"
+    return "open" if MARKET_OPEN <= now_et.time() < MARKET_CLOSE else "closed"
 
 
 def get_universe_cache() -> UniverseCache:
@@ -30,8 +54,20 @@ def get_universe_cache() -> UniverseCache:
     return _universe
 
 
-async def run_cycle() -> None:
-    """One scheduled cycle: refresh universe if stale, then scan."""
+async def run_cycle(force: bool = False) -> None:
+    """One scheduled cycle: refresh universe if stale, then scan.
+
+    Skips when the market is closed (keeping the last snapshot served) unless
+    `force` is set (manual /api/refresh) or no snapshot exists yet (first boot
+    off-hours still populates the dashboard once).
+    """
+    if (
+        not force
+        and current_market_session() == "closed"
+        and store.get_snapshot() is not None
+    ):
+        logger.info("Market closed; skipping scan cycle (serving last snapshot).")
+        return
     if _scan_lock.locked():
         logger.info("Previous scan still running; skipping this tick.")
         return
@@ -74,7 +110,8 @@ def start_scheduler() -> AsyncIOScheduler:
     asyncio.create_task(run_cycle())
     _scheduler = scheduler
     logger.info(
-        "Scheduler started; scan every %ds", settings.refresh_interval_seconds
+        "Scheduler started; scan every %ds during market hours",
+        settings.refresh_interval_seconds,
     )
     return scheduler
 

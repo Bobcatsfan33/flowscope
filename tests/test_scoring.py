@@ -1,7 +1,13 @@
 """Unit tests for the flow scoring engine (pure, no network)."""
 from __future__ import annotations
 
-from app.models import Catalyst, CatalystKind, ContractFlow, Direction
+from app.models import (
+    ZERO_OI_VOL_OI_RATIO_CAP,
+    Catalyst,
+    CatalystKind,
+    ContractFlow,
+    Direction,
+)
 from app.scoring import catalyst_boost, score_ticker
 
 
@@ -29,6 +35,15 @@ def test_contract_derived_metrics():
     assert c.moneyness == 0.0  # strike == underlying
 
 
+def test_zero_oi_with_volume_is_max_unusual():
+    # Volume on a brand-new strike (OI 0) is the MOST unusual case: it maps
+    # to the documented cap, not to 0.0.
+    c = _contract(volume=500, open_interest=0)
+    assert c.vol_oi_ratio == ZERO_OI_VOL_OI_RATIO_CAP
+    dead = _contract(volume=0, open_interest=0)
+    assert dead.vol_oi_ratio == 0.0
+
+
 def test_empty_returns_none():
     assert score_ticker("TEST", [], 100.0, ["test"]) is None
     zero_vol = [_contract(volume=0)]
@@ -45,6 +60,7 @@ def test_bullish_direction_from_call_premium():
     assert flow.direction == Direction.BULLISH
     assert flow.call_premium > flow.put_premium
     assert 0.0 <= flow.direction_confidence <= 1.0
+    assert flow.direction_basis == "premium_skew_proxy"
 
 
 def test_bearish_direction_from_put_premium():
@@ -82,6 +98,24 @@ def test_flow_score_bounded_0_100():
     assert 0.0 <= flow.flow_score <= 100.0
 
 
+def test_tiny_print_does_not_drive_peak_score():
+    # A 5-lot on OI 1 has vol/OI = 5 but trivial premium: the premium floor
+    # inside the peak component keeps it from claiming the full 25 points.
+    tiny = [_contract(volume=5, open_interest=1, last_price=1.0)]
+    flow = score_ticker("TEST", tiny, 100.0, ["test"])
+    assert flow is not None
+    assert flow.flow_score == 0.0
+
+
+def test_call_put_ratio_none_when_no_puts():
+    calls_only = [_contract(option_type="call", volume=5000, last_price=4.0)]
+    flow = score_ticker("TEST", calls_only, 100.0, ["test"])
+    assert flow.call_put_ratio is None  # undefined/infinite, no sentinel
+    puts_only = [_contract(option_type="put", volume=5000, last_price=4.0)]
+    flow = score_ticker("TEST", puts_only, 100.0, ["test"])
+    assert flow.call_put_ratio == 0.0
+
+
 def test_catalyst_boost_capped():
     cats = [
         Catalyst("T", CatalystKind.INSIDER, Direction.BULLISH, "h", "d", "", "s", "t", 5),
@@ -91,6 +125,15 @@ def test_catalyst_boost_capped():
     assert catalyst_boost(cats) <= 20.0
 
 
+def test_insider_boost_only_when_bullish():
+    bullish = [Catalyst("T", CatalystKind.INSIDER, Direction.BULLISH, "h", "d", "", "s", "t", 1.0)]
+    neutral = [Catalyst("T", CatalystKind.INSIDER, Direction.NEUTRAL, "h", "d", "", "s", "t", 1.0)]
+    bearish = [Catalyst("T", CatalystKind.INSIDER, Direction.BEARISH, "h", "d", "", "s", "t", 1.0)]
+    assert catalyst_boost(bullish) == 6.0
+    assert catalyst_boost(neutral) == 0.0  # routine Form 4 (e.g. SEC EDGAR)
+    assert catalyst_boost(bearish) == 0.0  # insider sale
+
+
 def test_with_catalysts_boosts_score():
     contracts = [_contract(volume=2000, open_interest=50, last_price=3.0)]
     flow = score_ticker("TEST", contracts, 100.0, ["test"])
@@ -98,3 +141,4 @@ def test_with_catalysts_boosts_score():
     boosted = flow.with_catalysts(cats)
     assert boosted.flow_score >= flow.flow_score
     assert len(boosted.catalysts) == 1
+    assert boosted.direction_basis == "premium_skew_proxy"

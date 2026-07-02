@@ -51,6 +51,10 @@ class Settings(BaseSettings):
         return bool(self.fmp_api_key.strip())
 
     @property
+    def has_alphavantage(self) -> bool:
+        return bool(self.alphavantage_api_key.strip())
+
+    @property
     def has_newsapi(self) -> bool:
         return bool(self.newsapi_key.strip())
 
@@ -66,8 +70,22 @@ class Settings(BaseSettings):
             else "https://sandbox.tradier.com"
         )
 
-    def capability_report(self) -> dict[str, bool]:
-        """Human-readable map of which integrations are active."""
+    def capability_report(self) -> dict[str, bool | str]:
+        """Human-readable map of which integrations are active.
+
+        Booleans mark integrations with live code paths. FMP / NewsAPI /
+        Quiver / AlphaVantage are *reserved hooks*: their keys are read from
+        the environment but no code path consumes them yet, so they report an
+        honest string status instead of masquerading as live capabilities.
+        """
+
+        def reserved(configured: bool) -> str:
+            return (
+                "configured (not yet used)"
+                if configured
+                else "not configured (reserved hook)"
+            )
+
         return {
             "yahoo_options": True,  # always available, no key
             "sec_edgar": True,  # always available, no key
@@ -75,9 +93,10 @@ class Settings(BaseSettings):
             "senate_disclosures": True,  # always available, no key
             "finnhub": self.has_finnhub,
             "tradier": self.has_tradier,
-            "fmp": self.has_fmp,
-            "newsapi": self.has_newsapi,
-            "quiver": self.has_quiver,
+            "fmp": reserved(self.has_fmp),
+            "newsapi": reserved(self.has_newsapi),
+            "quiver": reserved(self.has_quiver),
+            "alphavantage": reserved(self.has_alphavantage),
         }
 
 
