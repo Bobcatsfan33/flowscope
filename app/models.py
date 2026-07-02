@@ -8,6 +8,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
+# Cap applied when volume trades on a strike with zero open interest.
+# Fresh positioning on a brand-new strike is the *most* unusual case, so it
+# maps to a capped maximum instead of scoring zero. 50.0 comfortably saturates
+# all downstream scoring (peak vol/OI saturates at 5x).
+ZERO_OI_VOL_OI_RATIO_CAP = 50.0
+
 
 class Direction(str, Enum):
     BULLISH = "bullish"
@@ -42,7 +48,11 @@ class ContractFlow:
 
     @property
     def vol_oi_ratio(self) -> float:
-        return self.volume / self.open_interest if self.open_interest > 0 else 0.0
+        if self.open_interest > 0:
+            return self.volume / self.open_interest
+        # Zero OI with volume = entirely fresh positioning: maximum
+        # unusualness (capped) rather than a silent 0.0.
+        return ZERO_OI_VOL_OI_RATIO_CAP if self.volume > 0 else 0.0
 
     @property
     def premium(self) -> float:
@@ -89,13 +99,16 @@ class TickerFlow:
     direction_confidence: float  # 0-1
     call_premium: float
     put_premium: float
-    call_put_ratio: float
+    call_put_ratio: float | None  # None = undefined/infinite (calls, no puts)
     total_volume: int
     total_open_interest: int
     unusual_contracts: int     # # of contracts with vol/OI above threshold
     top_contracts: list[dict] = field(default_factory=list)
     catalysts: list[dict] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    # Direction is derived from call-vs-put traded premium skew, not from
+    # observed trade-by-trade order flow; surfaced so consumers know.
+    direction_basis: str = "premium_skew_proxy"
 
     def with_catalysts(self, catalysts: list[Catalyst]) -> "TickerFlow":
         """Return a new TickerFlow with catalysts attached and score boosted."""
@@ -117,6 +130,7 @@ class TickerFlow:
             top_contracts=self.top_contracts,
             catalysts=[c.to_dict() for c in catalysts],
             sources=self.sources,
+            direction_basis=self.direction_basis,
         )
 
     def to_dict(self) -> dict:
@@ -135,6 +149,9 @@ class Snapshot:
     flows: list[dict]          # serialized TickerFlow, ranked
     catalysts: list[dict]      # standalone catalyst feed (most recent)
     capabilities: dict
+    symbols_requested: int = 0   # symbols in this cycle's scan window
+    symbols_returned: int = 0    # symbols that yielded a scored flow
+    coverage_ratio: float = 0.0  # symbols_returned / symbols_requested
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:

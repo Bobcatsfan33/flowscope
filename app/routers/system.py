@@ -13,7 +13,11 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 @router.get("/health")
 def health() -> dict:
-    return {"success": True, "data": store.status()}
+    from app.scheduler import current_market_session  # local import (matches refresh)
+
+    data = store.status()
+    data["market_session"] = current_market_session()
+    return {"success": True, "data": data}
 
 
 @router.get("/meta")
@@ -32,8 +36,8 @@ def meta() -> dict:
 
 @router.post("/refresh")
 async def refresh() -> dict:
-    """Trigger an out-of-band scan cycle (non-blocking)."""
+    """Trigger an out-of-band scan cycle (non-blocking, bypasses market gate)."""
     from app.scheduler import run_cycle
 
-    asyncio.create_task(run_cycle())
+    asyncio.create_task(run_cycle(force=True))
     return {"success": True, "data": {"status": "scan_triggered"}}

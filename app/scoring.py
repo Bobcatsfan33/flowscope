@@ -10,7 +10,8 @@ Heuristics (mirroring how flow desks read the tape):
     premium — i.e. fresh positioning, not just churn on existing OI.
   * Bullish premium = call buying + put selling pressure; we approximate using
     call vs put traded premium, lightly weighted toward near-the-money strikes
-    where directional conviction concentrates.
+    where directional conviction concentrates. This is a *premium-skew proxy*
+    (surfaced as `direction_basis`), not observed trade-by-trade order flow.
   * Score blends: total unusual premium (log-scaled), peak vol/OI, and breadth
     (how many contracts are unusual), so a single fat print and broad-based
     accumulation both surface.
@@ -19,7 +20,7 @@ from __future__ import annotations
 
 import math
 
-from app.models import Catalyst, ContractFlow, Direction, TickerFlow
+from app.models import Catalyst, CatalystKind, ContractFlow, Direction, TickerFlow
 
 # Tunables (kept as named constants per coding-style: no magic numbers).
 VOL_OI_UNUSUAL_THRESHOLD = 1.0      # vol > OI flags fresh positioning
@@ -35,6 +36,8 @@ W_PEAK_VOL_OI = 0.25
 W_BREADTH = 0.20
 
 # Per-catalyst score boost added on top of options flow_score.
+# Note: the insider boost only applies to BULLISH Form 4s (open-market buys);
+# routine/neutral filings and sales carry no positive signal.
 CATALYST_BOOST = {
     "insider": 6.0,
     "institutional": 4.0,
@@ -71,10 +74,15 @@ def _premium_score(unusual_premium: float) -> float:
 
 
 def _peak_vol_oi_score(contracts: list[ContractFlow]) -> float:
-    """Map the single most extreme vol/OI ratio into 0-1 (saturates at 5x)."""
-    if not contracts:
+    """Map the single most extreme vol/OI ratio into 0-1 (saturates at 5x).
+
+    Only contracts clearing MIN_CONTRACT_PREMIUM are considered, so a tiny
+    print (e.g. a 5-lot on OI 1) cannot claim full marks.
+    """
+    meaningful = [c for c in contracts if c.premium >= MIN_CONTRACT_PREMIUM]
+    if not meaningful:
         return 0.0
-    peak = max(c.vol_oi_ratio for c in contracts)
+    peak = max(c.vol_oi_ratio for c in meaningful)
     return max(0.0, min(1.0, peak / 5.0))
 
 
@@ -84,10 +92,17 @@ def _breadth_score(unusual_count: int) -> float:
 
 
 def catalyst_boost(catalysts: list[Catalyst]) -> float:
-    """Total score boost from attached catalysts, capped."""
-    total = sum(
-        CATALYST_BOOST.get(c.kind.value, 0.0) * c.weight for c in catalysts
-    )
+    """Total score boost from attached catalysts, capped.
+
+    Insider (Form 4) catalysts only boost when explicitly bullish (a buy):
+    sources like SEC EDGAR emit routine filings and sales as NEUTRAL/BEARISH,
+    which should not inflate the score.
+    """
+    total = 0.0
+    for c in catalysts:
+        if c.kind == CatalystKind.INSIDER and c.direction != Direction.BULLISH:
+            continue
+        total += CATALYST_BOOST.get(c.kind.value, 0.0) * c.weight
     return min(MAX_CATALYST_BOOST, total)
 
 
@@ -126,7 +141,7 @@ def score_ticker(
     )
     flow_score = round(composite * 100.0, 2)
 
-    # Direction from signed premium skew.
+    # Direction from signed premium skew (a proxy, see module docstring).
     net_directional = sum(_directional_premium(c) for c in live)
     gross_directional = sum(abs(_directional_premium(c)) for c in live)
     confidence = abs(net_directional) / gross_directional if gross_directional else 0.0
@@ -137,11 +152,14 @@ def score_ticker(
     else:
         direction = Direction.BEARISH
 
-    call_put_ratio = (
-        call_premium / put_premium if put_premium > 0 else float("inf")
-        if call_premium > 0
-        else 0.0
-    )
+    # None = undefined/infinite ratio (call premium with zero put premium).
+    call_put_ratio: float | None
+    if put_premium > 0:
+        call_put_ratio = round(call_premium / put_premium, 2)
+    elif call_premium > 0:
+        call_put_ratio = None
+    else:
+        call_put_ratio = 0.0
 
     # Top contracts by premium for the drill-down panel.
     top = sorted(live, key=lambda c: c.premium, reverse=True)[:5]
@@ -168,10 +186,11 @@ def score_ticker(
         direction_confidence=round(confidence, 3),
         call_premium=round(call_premium, 0),
         put_premium=round(put_premium, 0),
-        call_put_ratio=round(call_put_ratio, 2) if call_put_ratio != float("inf") else 999.99,
+        call_put_ratio=call_put_ratio,
         total_volume=total_volume,
         total_open_interest=total_oi,
         unusual_contracts=len(unusual),
         top_contracts=top_contracts,
         sources=sources,
+        direction_basis="premium_skew_proxy",
     )

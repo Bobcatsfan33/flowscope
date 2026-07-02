@@ -29,20 +29,26 @@ class OptionsProvider(Protocol):
 
 async def fetch_options(
     symbol: str, providers: list[OptionsProvider]
-) -> tuple[list[ContractFlow], float, str | None]:
+) -> tuple[list[ContractFlow], float, str | None, list[str]]:
     """Try each available provider in order; return first success.
 
-    Returns (contracts, underlying_price, winning_source_name). On total
-    failure returns ([], 0.0, None) — callers skip the symbol.
+    Returns (contracts, underlying_price, winning_source_name, errors).
+    `errors` collects one entry per provider exception so the aggregator can
+    surface fetch failures instead of skipping symbols invisibly. On total
+    failure returns ([], 0.0, None, errors) — callers skip the symbol but
+    should record the errors.
     """
+    errors: list[str] = []
     for provider in providers:
         if not provider.available:
             continue
         try:
             contracts, price = await provider.fetch(symbol)
             if contracts:
-                return contracts, price, provider.name
+                return contracts, price, provider.name, errors
         except Exception as exc:  # noqa: BLE001 - failover should be resilient
-            logger.debug("%s failed for %s: %s", provider.name, symbol, exc)
+            message = f"{provider.name} failed for {symbol}: {exc}"
+            logger.warning(message)
+            errors.append(message)
             continue
-    return [], 0.0, None
+    return [], 0.0, None, errors

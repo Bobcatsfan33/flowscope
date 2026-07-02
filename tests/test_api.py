@@ -43,6 +43,9 @@ def client() -> TestClient:
                  "timestamp": "2026-06-20T00:00:00+00:00", "weight": 1.0},
             ],
             capabilities={"yahoo_options": True, "finnhub": False},
+            symbols_requested=2,
+            symbols_returned=2,
+            coverage_ratio=1.0,
         )
     )
     return TestClient(app)
@@ -85,5 +88,8 @@ def test_catalysts_filter_by_kind(client):
 
 
 def test_health_and_meta(client):
-    assert client.get("/api/health").json()["data"]["has_snapshot"] is True
+    health = client.get("/api/health").json()["data"]
+    assert health["has_snapshot"] is True
+    assert health["market_session"] in ("open", "closed")
+    assert health["data_as_of"] is not None
     assert "capabilities" in client.get("/api/meta").json()["data"]

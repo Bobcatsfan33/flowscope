@@ -49,14 +49,48 @@ _PER_SYMBOL_CATALYSTS = [
     UsaSpendingSource(),
 ]
 
+# Rotating scan-window offset, persisted across cycles. The universe is
+# alphabetically sorted, so a fixed `[:max_tickers_per_cycle]` slice would
+# scan the same leading names forever (NVDA/TSLA/etc. would never appear).
+_cycle_offset: int = 0
 
-async def _scan_symbol(symbol: str, sem: asyncio.Semaphore) -> TickerFlow | None:
+
+def _rotation_slice(tickers: list[str], window: int) -> list[str]:
+    """Return the current rotating window into the universe, wrapping around.
+
+    Advances the module-level offset each call so successive cycles cover the
+    full universe in slices of `window` symbols.
+    """
+    global _cycle_offset
+    if not tickers or window >= len(tickers):
+        _cycle_offset = 0
+        return list(tickers)
+    start = _cycle_offset % len(tickers)
+    end = start + window
+    window_slice = tickers[start:end]
+    if end > len(tickers):
+        window_slice = window_slice + tickers[: end - len(tickers)]
+    _cycle_offset = end % len(tickers)
+    return window_slice
+
+
+async def _scan_symbol(
+    symbol: str, sem: asyncio.Semaphore
+) -> tuple[TickerFlow | None, str | None]:
+    """Fetch + score one symbol. Returns (flow, error).
+
+    `error` is set when every provider failed with an exception, so the
+    aggregator can surface the failure instead of dropping it silently.
+    """
     async with sem:
-        contracts, price, source = await fetch_options(symbol, _OPTIONS_PROVIDERS)
+        contracts, price, source, fetch_errors = await fetch_options(
+            symbol, _OPTIONS_PROVIDERS
+        )
         if not contracts:
-            return None
+            error = f"{symbol}: {'; '.join(fetch_errors)}" if fetch_errors else None
+            return None, error
         sources = sorted({c.source for c in contracts}) or ([source] if source else [])
-        return score_ticker(symbol, contracts, price, sources)
+        return score_ticker(symbol, contracts, price, sources), None
 
 
 async def _gather_market_wide() -> dict[str, list[Catalyst]]:
@@ -83,14 +117,19 @@ async def run_scan(tickers: list[str]) -> Snapshot:
     settings = get_settings()
     errors: list[str] = []
     universe_size = len(tickers)
-    scan_list = tickers[: settings.max_tickers_per_cycle]
+    scan_list = _rotation_slice(tickers, settings.max_tickers_per_cycle)
 
     # 1-3: options flow + ranking.
     opt_sem = asyncio.Semaphore(OPTIONS_CONCURRENCY)
-    scanned_flows = await asyncio.gather(
+    scanned_results = await asyncio.gather(
         *(_scan_symbol(sym, opt_sem) for sym in scan_list)
     )
-    flows: list[TickerFlow] = [f for f in scanned_flows if f is not None]
+    flows: list[TickerFlow] = []
+    for flow, error in scanned_results:
+        if error:
+            errors.append(error)
+        if flow is not None:
+            flows.append(flow)
     flows.sort(key=lambda f: f.flow_score, reverse=True)
 
     # 4: market-wide catalysts (bucketed by symbol).
@@ -124,6 +163,12 @@ async def run_scan(tickers: list[str]) -> Snapshot:
             all_catalysts.extend(cats)
     all_catalysts.sort(key=lambda c: c.timestamp, reverse=True)
 
+    symbols_requested = len(scan_list)
+    symbols_returned = len(flows)
+    coverage_ratio = (
+        round(symbols_returned / symbols_requested, 3) if symbols_requested else 0.0
+    )
+
     return Snapshot(
         generated_at=datetime.now(timezone.utc).isoformat(),
         universe_size=universe_size,
@@ -131,5 +176,8 @@ async def run_scan(tickers: list[str]) -> Snapshot:
         flows=[f.to_dict() for f in enriched],
         catalysts=[c.to_dict() for c in all_catalysts[:STANDALONE_FEED_LIMIT]],
         capabilities=settings.capability_report(),
+        symbols_requested=symbols_requested,
+        symbols_returned=symbols_returned,
+        coverage_ratio=coverage_ratio,
         errors=errors,
     )
