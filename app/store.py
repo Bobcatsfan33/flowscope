@@ -52,6 +52,9 @@ class SnapshotStore:
                 "data_as_of": self._data_as_of,
                 "flows_count": len(snap.flows) if snap else 0,
                 "catalysts_count": len(snap.catalysts) if snap else 0,
+                "coverage_ratio": snap.coverage_ratio if snap else None,
+                "symbols_requested": snap.symbols_requested if snap else 0,
+                "symbols_returned": snap.symbols_returned if snap else 0,
             }
 
 
