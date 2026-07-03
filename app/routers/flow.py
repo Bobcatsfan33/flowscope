@@ -38,6 +38,7 @@ def get_flow(
             "scanned": snapshot.scanned,
             "returned": min(len(flows), limit),
             "total_matched": len(flows),
+            "scan_errors_count": len(snapshot.errors),
         },
     }
 

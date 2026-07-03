@@ -55,6 +55,8 @@ class SnapshotStore:
                 "coverage_ratio": snap.coverage_ratio if snap else None,
                 "symbols_requested": snap.symbols_requested if snap else 0,
                 "symbols_returned": snap.symbols_returned if snap else 0,
+                "scan_errors_count": len(snap.errors) if snap else 0,
+                "scan_errors": list(snap.errors[:20]) if snap else [],
             }
 
 

@@ -46,6 +46,7 @@ def client() -> TestClient:
             symbols_requested=2,
             symbols_returned=2,
             coverage_ratio=1.0,
+            errors=["AMD: yahoo: HTTP 429"],
         )
     )
     return TestClient(app)
@@ -92,4 +93,7 @@ def test_health_and_meta(client):
     assert health["has_snapshot"] is True
     assert health["market_session"] in ("open", "closed")
     assert health["data_as_of"] is not None
+    # error visibility: collected scan errors must surface, not be dropped
+    assert health["scan_errors_count"] == 1
+    assert health["scan_errors"] == ["AMD: yahoo: HTTP 429"]
     assert "capabilities" in client.get("/api/meta").json()["data"]
